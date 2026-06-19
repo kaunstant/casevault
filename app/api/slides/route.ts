@@ -3,8 +3,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]/route";
 import connectDB from "@/lib/db";
 import Slide from "@/lib/models/Slide";
-import fs from "fs";
-import path from "path";
 
 type SessionWithUserId = {
   user?: {
@@ -41,22 +39,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Both a preview image and a slide deck file are required." }, { status: 400 });
     }
 
-    // Local uploads are served from public/uploads during development.
-    const previewDir = path.join(process.cwd(), "public", "uploads", "previews");
-    const deckDir = path.join(process.cwd(), "public", "uploads", "decks");
-    fs.mkdirSync(previewDir, { recursive: true });
-    fs.mkdirSync(deckDir, { recursive: true });
-
-    const previewFileName = `${Date.now()}_${previewImageFile.name.replace(/\s+/g, "_")}`;
     const previewBuffer = Buffer.from(await previewImageFile.arrayBuffer());
-    fs.writeFileSync(path.join(previewDir, previewFileName), previewBuffer);
+    const previewMime = previewImageFile.type || "image/png";
+    const previewImageUrl = `data:${previewMime};base64,${previewBuffer.toString("base64")}`;
 
-    const deckFileName = `${Date.now()}_${slideDeckFile.name.replace(/\s+/g, "_")}`;
     const deckBuffer = Buffer.from(await slideDeckFile.arrayBuffer());
-    fs.writeFileSync(path.join(deckDir, deckFileName), deckBuffer);
-
-    const previewImageUrl = `/uploads/previews/${previewFileName}`;
-    const documentUrl = `/uploads/decks/${deckFileName}`;
+    const deckMime = slideDeckFile.type || "application/pdf";
+    const documentUrl = `data:${deckMime};base64,${deckBuffer.toString("base64")}`;
 
     // Store both documentUrl and slideUrl so existing readers keep working.
     const newSlide = await Slide.create({
