@@ -3,8 +3,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]/route";
 import connectDB from "@/lib/db";
 import Slide from "@/lib/models/Slide";
-import fs from "fs";
-import path from "path";
 
 type SlideRouteContext = {
   params: Promise<{ id: string }>;
@@ -44,16 +42,6 @@ async function getOwnedSlide(id: string, userId: string): Promise<OwnedSlideResu
   }
 
   return { slide };
-}
-
-function deleteLocalUpload(assetUrl?: string) {
-  // Only delete files the app created under public/uploads.
-  if (!assetUrl || !assetUrl.startsWith("/uploads/")) return;
-
-  const filePath = path.join(process.cwd(), "public", assetUrl.replace(/^\/+/, ""));
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
 }
 
 export async function GET(_req: Request, context: SlideRouteContext) {
@@ -97,25 +85,22 @@ export async function PUT(req: Request, context: SlideRouteContext) {
   // Only editable metadata is patched here.
   const updateFields: Record<string, unknown> = { title, summary, year, tags };
 
-  if (slideDeckFile) {
+  if (slideDeckFile && slideDeckFile.size > 0) {
     // A new deck replaces the document pointers but leaves the record id intact.
-    const deckDir = path.join(process.cwd(), "public", "uploads", "decks");
-    fs.mkdirSync(deckDir, { recursive: true });
-    const deckFileName = `${Date.now()}_${slideDeckFile.name.replace(/\s+/g, "_")}`;
-    fs.writeFileSync(path.join(deckDir, deckFileName), Buffer.from(await slideDeckFile.arrayBuffer()));
+    const deckBuffer = Buffer.from(await slideDeckFile.arrayBuffer());
+    const deckMime = slideDeckFile.type || "application/pdf";
+    const inlineDeckData = `data:${deckMime};base64,${deckBuffer.toString("base64")}`;
     
-    updateFields.documentUrl = `/uploads/decks/${deckFileName}`;
-    updateFields.slideUrl = `/uploads/decks/${deckFileName}`;
+    updateFields.documentUrl = inlineDeckData;
+    updateFields.slideUrl = inlineDeckData;
   }
 
-  if (previewImageFile) {
+  if (previewImageFile && previewImageFile.size > 0) {
     // Thumbnail replacement is optional and independent from deck replacement.
-    const previewDir = path.join(process.cwd(), "public", "uploads", "previews");
-    fs.mkdirSync(previewDir, { recursive: true });
-    const previewFileName = `${Date.now()}_${previewImageFile.name.replace(/\s+/g, "_")}`;
-    fs.writeFileSync(path.join(previewDir, previewFileName), Buffer.from(await previewImageFile.arrayBuffer()));
+    const previewBuffer = Buffer.from(await previewImageFile.arrayBuffer());
+    const previewMime = previewImageFile.type || "image/png";
     
-    updateFields.previewImageUrl = `/uploads/previews/${previewFileName}`;
+    updateFields.previewImageUrl = `data:${previewMime};base64,${previewBuffer.toString("base64")}`;
   }
 
   const updated = await Slide.findByIdAndUpdate(id, { $set: updateFields }, { new: true });
@@ -132,11 +117,8 @@ export async function DELETE(_req: Request, context: SlideRouteContext) {
   }
 
   const { id } = await context.params;
-  const { slide, response } = await getOwnedSlide(id, userId);
+  const { response } = await getOwnedSlide(id, userId);
   if (response) return response;
-
-  deleteLocalUpload(slide?.previewImageUrl);
-  deleteLocalUpload(slide?.documentUrl || slide?.slideUrl);
 
   await Slide.findByIdAndDelete(id);
   return NextResponse.json({ deleted: true });
